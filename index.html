@@ -212,6 +212,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .photo-box{aspect-ratio:4/5;background:var(--surface-2);border-radius:12px;overflow:hidden;display:grid;place-items:center;border:1px dashed var(--line)}
 .photo-box img{width:100%;height:100%;object-fit:cover}
 .photo-box .ph-mono{width:60px;opacity:.25}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap}
+.thumbs button{width:48px;height:58px;border-radius:8px;overflow:hidden;border:2px solid var(--line);padding:0;background:var(--surface-2);cursor:pointer}
+.thumbs button[aria-pressed="true"]{border-color:var(--gold)}
+.thumbs img{width:100%;height:100%;object-fit:cover}
+.pcard .nfotos{position:absolute;bottom:8px;right:8px;display:flex;align-items:center;gap:3px;background:rgba(10,10,11,.8);border:1px solid var(--line);border-radius:8px;padding:2px 7px;font-size:12px;font-weight:700}
+.pcard .nfotos svg.i{width:14px;height:14px}
+.lphoto{position:relative}.lp-n{position:absolute;bottom:0;right:0;background:var(--gold);color:#111;font-size:10px;font-weight:800;padding:0 3px;border-radius:4px 0 0 0}
 .item-form{display:grid;grid-template-columns:200px 1fr;gap:18px}
 @media (max-width:620px){.item-form{grid-template-columns:1fr}.item-form .photo-col{max-width:220px}}
 .vm{display:grid;grid-template-columns:1.1fr 1fr;gap:20px}
@@ -718,7 +725,7 @@ function vInventario(){
   const stockChip=i=>i.stock<=0?'<span class="chip bad">Vendida</span>':i.stock>1?`<span class="chip ok">${i.stock} disp.</span>`:'';
   const card=i=>`<button class="pcard ${i.stock<=0?'sold':''}" data-act="item" data-k="${esc(i.key)}">
       <div class="ph">${i.foto?`<img class="photo" src="${blobUrl(i.foto)}" alt="" loading="lazy" onerror="this.remove()">`:`<img class="ph-mono" src="${MONO}" alt=""><span class="add">${ic(IC.cam)}Agregar foto</span>`}
-        <span class="tag">${stockChip(i)}</span><span class="size">${esc(i.talla)}</span></div>
+        <span class="tag">${stockChip(i)}</span><span class="size">${esc(i.talla)}</span>${(i.fotosExtra||[]).length?`<span class="nfotos">${ic(IC.cam)}${1+i.fotosExtra.length}</span>`:''}</div>
       <div class="b"><span class="brand-t">${esc(i.marca||'Sin marca')}</span><span class="name">${esc(i.articulo)}</span>
         <span class="price">${cop(i.precio)}</span>
         <span class="meta">Costo ${cop(i.costo)} · <span class="good">+${cop((i.precio||0)-(i.costo||0))}</span></span>
@@ -943,7 +950,7 @@ const photoErr=e=>{const c=e&&e.code;console.error('foto',e);return c==='too_lar
 function itemModal(key){
   const it0=D.byKey.get(key);if(!it0)return;
   const lote0=S.lotes.find(l=>l.id===it0.loteId);if(!lote0)return;
-  const st={marca:it0.marca||'',articulo:it0.articulo||'',ref:it0.ref||'',talla:it0.talla||'',cant:String(it0.cant??1),usd:String(it0.usd??''),desc:String(it0.desc||0),precio:it0.precio?int(it0.precio):'',foto:it0.foto||null};
+  const st={marca:it0.marca||'',articulo:it0.articulo||'',ref:it0.ref||'',talla:it0.talla||'',cant:String(it0.cant??1),usd:String(it0.usd??''),desc:String(it0.desc||0),precio:it0.precio?int(it0.precio):'',fotos:[it0.foto,...(it0.fotosExtra||[])].filter(Boolean),sel:0};
   const m=openModal('Prenda','wide');let busy=false,upl=false;
   const lote=()=>S.lotes.find(l=>l.id===it0.loteId)||lote0;
   const calc=()=>{
@@ -956,8 +963,13 @@ function itemModal(key){
   const draw=()=>{withFocus(m.body,()=>{const cur=D.byKey.get(key)||it0;m.body.innerHTML=`
     <div class="item-form">
       <div class="photo-col" style="display:flex;flex-direction:column;gap:8px">
-        <div class="photo-box">${st.foto?`<img src="${blobUrl(st.foto)}" alt="Foto de la prenda">`:`<img class="ph-mono" src="${MONO}" alt="">`}</div>
-        ${assets?`<label class="btn full" for="im-file">${ic(IC.cam)}${upl?'Subiendo…':st.foto?'Cambiar foto':'Agregar foto'}</label><input type="file" id="im-file" accept="image/*" class="sr">${st.foto?`<button class="btn ghost sm" data-a="quitar-foto">Quitar foto</button>`:''}`:`<p class="hint warn">Inicia sesión para subir fotos.</p>`}
+        <div class="photo-box">${st.fotos[st.sel]?`<img src="${blobUrl(st.fotos[st.sel])}" alt="Foto ${st.sel+1} de la prenda">`:`<img class="ph-mono" src="${MONO}" alt="">`}</div>
+        ${st.fotos.length>1?`<div class="thumbs" role="group" aria-label="Fotos de la prenda">${st.fotos.map((f,i)=>`<button type="button" data-a="ver" data-i="${i}" aria-pressed="${i===st.sel}" aria-label="Ver foto ${i+1}${i===0?' (principal)':''}"><img src="${blobUrl(f)}" alt=""></button>`).join('')}</div>
+          <p class="hint" style="margin:0">${st.sel===0?'Esta es la foto <b>principal</b> (la que sale en el inventario).':`Foto ${st.sel+1} de ${st.fotos.length}.`}</p>`:''}
+        ${assets?`<label class="btn full" for="im-file">${ic(IC.cam)}${upl?'Subiendo…':st.fotos.length?'Agregar más fotos':'Agregar fotos'}</label><input type="file" id="im-file" accept="image/*" multiple class="sr">
+          ${st.sel>0?`<button class="btn ghost sm" data-a="principal">Usar como foto principal</button>`:''}
+          ${st.fotos.length?`<button class="btn ghost sm" data-a="quitar-foto">Quitar esta foto</button>`:''}
+          <p class="hint" style="margin:0">Puedes elegir varias fotos a la vez: frente, espalda y detalles.</p>`:`<p class="hint warn">Inicia sesión para subir fotos.</p>`}
       </div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <div class="eyebrow">Lote: ${esc(lote().nombre)} · dólar a ${int(lote().dolar)} · +${esc(lote().impPct)}%</div>
@@ -981,9 +993,10 @@ function itemModal(key){
   draw();
   m.body.addEventListener('input',e=>{const f=e.target.dataset.f;if(f){st[f]=e.target.value;calc()}});
   m.body.addEventListener('change',async e=>{
-    if(e.target.id!=='im-file'||!e.target.files[0])return;
-    upl=true;draw();
-    try{const id=await uploadPhoto(e.target.files[0]);st.foto=id;await saveItem(true)}catch(err){toast(photoErr(err),'bad')}
+    if(e.target.id!=='im-file'||!e.target.files.length)return;
+    const files=[...e.target.files];upl=true;draw();let n=0;
+    for(const f of files){try{st.fotos.push(await uploadPhoto(f));n++}catch(err){toast(photoErr(err),'bad')}}
+    if(n){st.sel=st.fotos.length-1;if(await saveItem(true))toast(n===1?'Foto agregada':`${n} fotos agregadas`,'good')}
     upl=false;draw();
   });
   async function saveItem(silent){
@@ -993,7 +1006,7 @@ function itemModal(key){
     const minC=(+cur.prevVend||0)+(cur.vApp||0);
     if(cant<minC){toast(`La cantidad no puede ser menor que lo vendido (${minC}).`,'bad');return false}
     if(!st.articulo.trim()){toast('Escribe el nombre de la prenda.','bad');return false}
-    Object.assign(l.items[i],{marca:st.marca.trim().toUpperCase(),articulo:st.articulo.trim(),ref:st.ref.trim(),talla:(st.talla.trim()||'ÚNICA').toUpperCase(),cant,usd:parseNum(st.usd),desc:parseNum(st.desc),precio:Math.round(parseNum(st.precio)),foto:st.foto||null});
+    Object.assign(l.items[i],{marca:st.marca.trim().toUpperCase(),articulo:st.articulo.trim(),ref:st.ref.trim(),talla:(st.talla.trim()||'ÚNICA').toUpperCase(),cant,usd:parseNum(st.usd),desc:parseNum(st.desc),precio:Math.round(parseNum(st.precio)),foto:st.fotos[0]||null,fotosExtra:st.fotos.slice(1)});
     finishLote(l);
     const {id,...data}=l;
     const ok=await write(()=>db.collection('lotes').doc(id).set(data));
@@ -1003,18 +1016,25 @@ function itemModal(key){
   m.body.addEventListener('click',async e=>{
     const a=e.target.closest('[data-a]');if(!a)return;const act=a.dataset.a;
     if(act==='save'){if(busy)return;busy=true;draw();const ok=await saveItem(false);busy=false;if(ok)m.close();else draw()}
-    if(act==='quitar-foto'){const old=st.foto;st.foto=null;if(await saveItem(true)){if(assets&&old&&!D.items.some(x=>x.foto===old&&x.key!==key))assets.delete(old).catch(()=>{})}draw()}
+    if(act==='ver'){st.sel=+a.dataset.i;draw()}
+    if(act==='principal'){const [f]=st.fotos.splice(st.sel,1);st.fotos.unshift(f);st.sel=0;if(await saveItem(true))toast('Foto principal cambiada','good');draw()}
+    if(act==='quitar-foto'){
+      if(!(await confirmBox('¿Quitar esta foto de la prenda?','Quitar foto')))return;
+      const at=st.sel,old=st.fotos[at];st.fotos.splice(at,1);st.sel=Math.max(0,Math.min(at,st.fotos.length-1));
+      if(await saveItem(true)){if(assets&&old&&!fotoEnUso(old,key))assets.delete(old).catch(()=>{})}else{st.fotos.splice(at,0,old);st.sel=at}
+      draw()}
     if(act==='vender'){m.close();ventaModal([key])}
     if(act==='lote'){m.close();loteModal(it0.loteId)}
     if(act==='del'){
       if(!(await confirmBox(`¿Borrar <b>${esc(st.articulo)}</b> (${esc(st.talla)}) del lote?`)))return;
       if(!canWrite())return;
       const l=structuredClone(lote());l.items=l.items.filter(x=>x.id!==it0.id);finishLote(l);const {id,...data}=l;
-      if(await write(()=>db.collection('lotes').doc(id).set(data))){m.close();toast('Prenda borrada','good');if(assets&&st.foto&&!D.items.some(x=>x.foto===st.foto&&x.key!==key))assets.delete(st.foto).catch(()=>{})}
+      if(await write(()=>db.collection('lotes').doc(id).set(data))){m.close();toast('Prenda borrada','good');if(assets)for(const f of st.fotos)if(!fotoEnUso(f,key))assets.delete(f).catch(()=>{})}
     }
   });
   m.onData=()=>{if(!D.byKey.get(key)){m.close();return}calc()};
 }
+function fotoEnUso(id,exceptKey){return D.items.some(x=>x.key!==exceptKey&&(x.foto===id||(x.fotosExtra||[]).includes(id)))}
 function dlMarcas(){return `<datalist id="dl-marcas">${D.marcas.map(x=>`<option value="${esc(x)}">`).join('')}</datalist><datalist id="dl-tallas">${TALLAS.concat(D.tallas.filter(t=>!TALLAS.includes(t))).map(x=>`<option value="${esc(x)}">`).join('')}</datalist>`}
 function finishLote(l){
   const c=calcLote(l,l.items||[]);
@@ -1028,9 +1048,9 @@ function loteModal(id){
   const orig=id?S.lotes.find(l=>l.id===id):null;if(id&&!orig)return;
   const L=orig?{nombre:orig.nombre||'',fecha:orig.fecha||'',proveedor:orig.proveedor||'',dolar:int(orig.dolar),impPct:String(orig.impPct??7),envio:orig.envio!=null?String(orig.envio):(orig.envioCOP?int(orig.envioCOP):''),envioMon:orig.envioMon||'COP',otrosCOP:orig.otrosCOP?int(orig.otrosCOP):'',reparto:orig.reparto||'valor',aumento:orig.aumento?int(orig.aumento):'',pagado:!!orig.pagado,nota:orig.nota||''}
     :{nombre:`SN°${S.lotes.length+1} `,fecha:hoy(),proveedor:'',dolar:int(cfg('dolar')),impPct:String(cfg('impPct')),envio:'',envioMon:'USD',otrosCOP:'',reparto:'valor',aumento:int(cfg('aumento')),pagado:true,nota:''};
-  const rows=orig?(orig.items||[]).map(it=>({id:it.id,marca:it.marca||'',articulo:it.articulo||'',ref:it.ref||'',talla:it.talla||'',cant:String(it.cant??1),usd:String(it.usd??''),desc:it.desc?String(it.desc):'',precio:it.precio?int(it.precio):'',foto:it.foto||null,prevVend:+it.prevVend||0,prevCliente:it.prevCliente||'',sold:(+it.prevVend||0)+(D.vend.get(orig.id+'|'+it.id)||0),hasApp:(D.vend.get(orig.id+'|'+it.id)||0)>0}))
+  const rows=orig?(orig.items||[]).map(it=>({id:it.id,marca:it.marca||'',articulo:it.articulo||'',ref:it.ref||'',talla:it.talla||'',cant:String(it.cant??1),usd:String(it.usd??''),desc:it.desc?String(it.desc):'',precio:it.precio?int(it.precio):'',foto:it.foto||null,fotosExtra:it.fotosExtra||[],prevVend:+it.prevVend||0,prevCliente:it.prevCliente||'',sold:(+it.prevVend||0)+(D.vend.get(orig.id+'|'+it.id)||0),hasApp:(D.vend.get(orig.id+'|'+it.id)||0)>0}))
     :[newRow()];
-  function newRow(from){return{id:uid(),marca:from?from.marca:'',articulo:from?from.articulo:'',ref:'',talla:'',cant:'1',usd:from?from.usd:'',desc:from?from.desc:'',precio:from?from.precio:'',foto:from?from.foto:null,prevVend:0,prevCliente:'',sold:0,hasApp:false}}
+  function newRow(from){return{id:uid(),marca:from?from.marca:'',articulo:from?from.articulo:'',ref:'',talla:'',cant:'1',usd:from?from.usd:'',desc:from?from.desc:'',precio:from?from.precio:'',foto:from?from.foto:null,fotosExtra:from?[...(from.fotosExtra||[])]:[],prevVend:0,prevCliente:'',sold:0,hasApp:false}}
   const m=openModal(orig?orig.nombre:'Nuevo lote de Estados Unidos','xwide');let busy=false;
   const provs=[...new Set(S.lotes.map(l=>l.proveedor).filter(Boolean))];
   const stats=orig?loteStats(orig):null;
@@ -1064,7 +1084,7 @@ function loteModal(id){
     </div>`;
   const tb=$('#lm-rows',m.body);
   const drawRows=()=>{withFocus(m.body,()=>{tb.innerHTML=rows.map((r,i)=>`<tr>
-      <td>${assets?`<label class="lphoto" for="lr-f-${i}" title="${r.foto?'Cambiar foto':'Agregar foto'}">${r.upl?'<span class="muted">…</span>':r.foto?`<img src="${blobUrl(r.foto)}" alt="">`:ic(IC.cam)}<span class="sr">${r.foto?'Cambiar foto':'Agregar foto'}</span></label><input type="file" accept="image/*" id="lr-f-${i}" data-foto="${i}" class="sr">`:`<span class="lphoto" title="Fotos no disponibles en esta vista">${ic(IC.cam)}</span>`}</td>
+      <td>${assets?`<label class="lphoto" for="lr-f-${i}" title="${r.foto?'Cambiar foto':'Agregar foto'}">${r.upl?'<span class="muted">…</span>':r.foto?`<img src="${blobUrl(r.foto)}" alt="">${(r.fotosExtra||[]).length?`<span class="lp-n">+${r.fotosExtra.length}</span>`:''}`:ic(IC.cam)}<span class="sr">${r.foto?'Cambiar foto':'Agregar foto'}</span></label><input type="file" accept="image/*" id="lr-f-${i}" data-foto="${i}" class="sr">`:`<span class="lphoto" title="Fotos no disponibles en esta vista">${ic(IC.cam)}</span>`}</td>
       <td><input class="w-marca" id="lr-m-${i}" data-r="${i}" data-k="marca" list="dl-marcas" value="${esc(r.marca)}" aria-label="Marca"></td>
       <td><input class="w-art" id="lr-a-${i}" data-r="${i}" data-k="articulo" value="${esc(r.articulo)}" aria-label="Prenda" placeholder="Camiseta negra logo…"></td>
       <td><input class="w-ref" id="lr-r-${i}" data-r="${i}" data-k="ref" value="${esc(r.ref)}" aria-label="Referencia"></td>
@@ -1125,7 +1145,7 @@ function loteModal(id){
       const aum=parseNum(L.aumento);
       const doc={nombre:L.nombre.trim(),fecha:L.fecha||'',proveedor:L.proveedor.trim(),dolar:parseNum(L.dolar),impPct:parseNum(L.impPct),envio:parseNum(L.envio),envioMon:L.envioMon,otrosCOP:Math.round(parseNum(L.otrosCOP)),reparto:L.reparto,aumento:Math.round(aum),pagado:!!L.pagado,nota:L.nota.trim(),
         importado:orig?!!orig.importado:false,creado:orig?(orig.creado||Date.now()):Date.now(),actualizado:Date.now(),
-        items:keep.map(r=>({id:r.id,marca:r.marca.trim().toUpperCase(),articulo:r.articulo.trim(),ref:r.ref.trim(),talla:(r.talla.trim()||'ÚNICA').toUpperCase(),cant:Math.round(parseNum(r.cant)),usd:parseNum(r.usd),desc:parseNum(r.desc),precio:0,foto:r.foto||null,prevVend:r.prevVend||0,prevCliente:r.prevCliente||''}))};
+        items:keep.map(r=>({id:r.id,marca:r.marca.trim().toUpperCase(),articulo:r.articulo.trim(),ref:r.ref.trim(),talla:(r.talla.trim()||'ÚNICA').toUpperCase(),cant:Math.round(parseNum(r.cant)),usd:parseNum(r.usd),desc:parseNum(r.desc),precio:0,foto:r.foto||null,fotosExtra:r.fotosExtra||[],prevVend:r.prevVend||0,prevCliente:r.prevCliente||''}))};
       finishLote(doc);
       doc.items.forEach((it,i)=>{const r=keep[i];it.precio=Math.round(r.precio.trim()?parseNum(r.precio):sugerido(it.costo,aum))});
       if(JSON.stringify(doc).length>240000){toast('El lote tiene demasiadas prendas. Divídelo en dos lotes.','bad');return}
