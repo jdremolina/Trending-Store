@@ -363,10 +363,15 @@ function toast(msg,kind=''){
   const t=document.createElement('div');t.className='toast '+kind;t.textContent=msg;$('#toasts').appendChild(t);
   setTimeout(()=>t.remove(),kind==='bad'?6000:3200);
 }
+function toastAction(msg,label,fn){
+  const t=document.createElement('div');t.className='toast good';t.style.pointerEvents='auto';t.style.display='flex';t.style.alignItems='center';t.style.gap='12px';
+  t.innerHTML=`<span style="flex:1">${esc(msg)}</span><button class="btn sm">${esc(label)}</button>`;
+  t.querySelector('button').onclick=async()=>{t.remove();await fn()};$('#toasts').appendChild(t);setTimeout(()=>t.remove(),9000);
+}
 function loadScript(src){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(new Error('No se pudo cargar '+src));document.head.appendChild(s);});}
 
 /* ---------- state ---------- */
-const S={lotes:[],ventas:[],caja:[],config:{},got:{},ok:{},status:'conectando',slow:false,online:navigator.onLine,
+const S={lotes:[],ventas:[],caja:[],papelera:[],config:{},got:{},ok:{},status:'conectando',slow:false,online:navigator.onLine,
   view:'resumen',per:null,inv:{q:'',lote:'',marca:'',talla:'',estado:'disp',modo:'fotos',orden:'lote'},
   cajaForm:{tipo:'salida',cat:'Pago empleados',desc:'',monto:'',fecha:hoy()},ventasQ:''};
 (function(){const d=new Date();S.per={tipo:'mes',y:d.getFullYear(),m:d.getMonth()+1}})();
@@ -431,9 +436,9 @@ const sugerido=(costo,aum)=>aum>0?Math.ceil((costo+aum)/1000)*1000:0;
 /* ---------- db ---------- */
 /* Supabase: una tabla "docs" (collection, id, data) con tiempo real */
 const CACHE_KEY='trending-cache-v1';
-function cacheSave(){try{localStorage.setItem(CACHE_KEY,JSON.stringify({t:Date.now(),lotes:S.lotes,ventas:S.ventas,caja:S.caja,config:S.config}))}catch(e){}}
+function cacheSave(){try{localStorage.setItem(CACHE_KEY,JSON.stringify({t:Date.now(),lotes:S.lotes,ventas:S.ventas,caja:S.caja,papelera:S.papelera,config:S.config}))}catch(e){}}
 let cacheTimer=0;function cacheSoon(){clearTimeout(cacheTimer);cacheTimer=setTimeout(cacheSave,800)}
-function cacheLoad(){try{const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');if(c){S.lotes=c.lotes||[];S.ventas=c.ventas||[];S.caja=c.caja||[];S.config=c.config||{};S.cacheT=c.t;S.got={lotes:1,ventas:1,caja:1,config:1};return true}}catch(e){}return false}
+function cacheLoad(){try{const c=JSON.parse(localStorage.getItem(CACHE_KEY)||'null');if(c){S.lotes=c.lotes||[];S.ventas=c.ventas||[];S.caja=c.caja||[];S.papelera=c.papelera||[];S.config=c.config||{};S.cacheT=c.t;S.got={lotes:1,ventas:1,caja:1,config:1};return true}}catch(e){}return false}
 function genId(){const a=new Uint8Array(12);crypto.getRandomValues(a);return Array.from(a,b=>'abcdefghijklmnopqrstuvwxyz0123456789'[b%36]).join('')}
 function applyDoc(col,id,data){
   if(col==='config'){if(id==='general')S.config=data?structuredClone(data):{}}
@@ -471,9 +476,9 @@ let channel=null;
 async function loadAll(){
   try{
     const rows=[];for(let from=0;;from+=1000){const{data,error}=await sb.from('docs').select('collection,id,data').range(from,from+999);if(error)throw error;rows.push(...data);if(data.length<1000)break}
-    const next={lotes:[],ventas:[],caja:[],config:{}};
+    const next={lotes:[],ventas:[],caja:[],papelera:[],config:{}};
     for(const r of rows){if(r.collection==='config'){if(r.id==='general')next.config=r.data||{}}else if(next[r.collection])next[r.collection].push({id:r.id,...r.data})}
-    Object.assign(S,next);S.got={lotes:1,ventas:1,caja:1,config:1};S.status='ok';S.loadErr=null;S.lastLoad=Date.now();cacheSave();
+    Object.assign(S,next);S.got={lotes:1,ventas:1,caja:1,config:1};setTimeout(purgarPapelera,3000);S.status='ok';S.loadErr=null;S.lastLoad=Date.now();cacheSave();
   }catch(e){console.error(e);S.loadErr=errCode(e);if(S.loadErr==='auth'){await sb.auth.signOut().catch(()=>{});return}if(!S.got.lotes&&!cacheLoad())S.status='sin-red';else S.status='cache'}
   paint();
 }
@@ -482,7 +487,7 @@ function subscribe(){
   channel=sb.channel('docs-cambios').on('postgres_changes',{event:'*',schema:'public',table:'docs'},p=>{const r=p.eventType==='DELETE'?p.old:p.new;if(!r||!r.collection||!r.id)return;applyDoc(r.collection,r.id,p.eventType==='DELETE'?null:r.data)}).subscribe(st=>{S.rt=st;if(st==='SUBSCRIBED'&&S.lastLoad&&Date.now()-S.lastLoad>5000)loadAll();paint()});
 }
 function startData(){if(cacheLoad())S.status='cache';loadAll();subscribe()}
-function stopData(){if(channel){sb.removeChannel(channel);channel=null}S.lotes=[];S.ventas=[];S.caja=[];S.config={};S.got={};S.status='conectando';try{localStorage.removeItem(CACHE_KEY)}catch(e){}}
+function stopData(){if(channel){sb.removeChannel(channel);channel=null}S.lotes=[];S.ventas=[];S.caja=[];S.papelera=[];S.config={};S.got={};S.status='conectando';try{localStorage.removeItem(CACHE_KEY)}catch(e){}}
 async function init(){
   window.addEventListener('hashchange',route);route();
   window.addEventListener('online',()=>{S.online=true;if(S.user)loadAll();paint()});
@@ -744,7 +749,7 @@ function vInventario(){
       <label class="sr" for="inv-orden">Orden</label><select id="inv-orden" data-inv="orden"><option value="lote" ${f.orden==='lote'?'selected':''}>Por lote</option><option value="marca" ${f.orden==='marca'?'selected':''}>Por marca</option><option value="precio" ${f.orden==='precio'?'selected':''}>Mayor precio</option><option value="ganancia" ${f.orden==='ganancia'?'selected':''}>Mayor ganancia</option></select>
       <div class="seg" role="group" aria-label="Vista"><button data-act="modo" data-m="fotos" aria-pressed="${f.modo==='fotos'}" title="Fotos">${ic(IC.grid)}</button><button data-act="modo" data-m="lista" aria-pressed="${f.modo==='lista'}" title="Lista">${ic(IC.rows)}</button></div>
     </div>
-    <p class="hint">${list.length} resultado${list.length===1?'':'s'}${sinFoto?` · ${sinFoto} prendas disponibles sin foto: tócalas para agregarla`:''}</p>
+    <p class="hint">${list.length} resultado${list.length===1?'':'s'}${sinFoto?` · ${sinFoto} prendas disponibles sin foto: tócalas para agregarla`:''}${S.papelera.length?` · <a href="#ajustes" class="gold">Papelera (${S.papelera.length})</a>`:''}</p>
   </div>
   ${seedCard()}
   ${!list.length?`<div class="card empty"><img src="${MONO}" alt="">${D.items.length?'Nada coincide con esos filtros.':'Todavía no hay prendas. Registra tu primer lote de USA para llenar el inventario.'}${D.items.length?'':`<button class="btn primary" data-act="nuevo-lote">${ic(IC.plus)}Nuevo lote</button>`}</div>`
@@ -871,6 +876,7 @@ function vAjustes(){
     <p style="margin:0 0 10px" class="muted">Sube una copia de seguridad (.json) o el archivo de lotes de tu Excel.</p>
     <label class="btn" for="imp-file2">${ic(IC.dl)}Importar archivo .json</label><input type="file" id="imp-file2" accept=".json,application/json" class="sr" data-import>
   </div></div>
+  ${papeleraCard()}
   <div class="card"><div class="card-h"><h2>Datos que salen en la factura</h2></div>
     <div class="row3">
       <div class="fld"><label for="aj-neg">Negocio</label><input id="aj-neg" data-cfg="negocio" value="${c('negocio')}" placeholder="Trending Store"></div>
@@ -904,6 +910,61 @@ async function importJson(file){
     if(!rows.some(r=>r.collection==='config'))await saveConfig({importado:true});
     await loadAll();toast(`Listo: ${n('lotes')} lotes importados`,'good');
   }catch(e){console.error(e);toast('No se pudo importar: '+(e.message||'revisa tu internet'),'bad')}
+}
+
+/* ---------- papelera ---------- */
+const DIAS_PAPELERA=30;
+async function aPapelera(tipo,data,titulo){
+  const id=genId();
+  const ok=await write(()=>db.collection('papelera').doc(id).set({tipo,data,titulo,borrado:Date.now(),por:(S.user&&S.user.email)||''}));
+  return ok?id:null;
+}
+function fotosDe(p){
+  if(p.tipo==='prenda')return [p.data.item.foto,...(p.data.item.fotosExtra||[])].filter(Boolean);
+  if(p.tipo==='lote')return (p.data.items||[]).flatMap(it=>[it.foto,...(it.fotosExtra||[])]).filter(Boolean);
+  return [];
+}
+async function restaurar(pid,silent){
+  const p=S.papelera.find(x=>x.id===pid);if(!p||!canWrite())return false;let ok=false;
+  if(p.tipo==='prenda'){
+    const l0=S.lotes.find(l=>l.id===p.data.loteId);
+    if(!l0){toast(`El lote "${p.data.loteNombre}" ya no existe. Restaura primero el lote.`,'bad');return false}
+    const l=structuredClone(l0);if(!l.items.some(x=>x.id===p.data.item.id)){const at=Math.min(p.data.pos??l.items.length,l.items.length);l.items.splice(at,0,structuredClone(p.data.item))}
+    finishLote(l);const{id,...data}=l;ok=await write(()=>db.collection('lotes').doc(id).set(data));
+  }else if(p.tipo==='lote'){
+    if(S.lotes.some(l=>l.id===p.data.id)){toast('Ese lote ya está en el inventario.','bad');return false}
+    const{id,...data}=p.data;ok=await write(()=>db.collection('lotes').doc(id).set(data));
+  }else if(p.tipo==='venta'||p.tipo==='caja'){
+    const col=p.tipo==='venta'?'ventas':'caja';const{id,...data}=p.data;ok=await write(()=>db.collection(col).doc(id).set(data));
+  }
+  if(ok){await write(()=>db.collection('papelera').doc(pid).delete());if(!silent)toast(`${p.titulo} restaurado`,'good')}
+  return ok;
+}
+async function borrarDefinitivo(pid){
+  const p=S.papelera.find(x=>x.id===pid);if(!p)return;
+  const fotos=fotosDe(p);
+  if(await write(()=>db.collection('papelera').doc(pid).delete())){
+    if(assets)for(const f of fotos){const enOtra=S.papelera.some(x=>x.id!==pid&&fotosDe(x).includes(f));if(!fotoEnUso(f,null)&&!enOtra)assets.delete(f).catch(()=>{})}
+    return true}
+  return false;
+}
+let purgado=false;
+async function purgarPapelera(){
+  if(purgado||!S.user||!navigator.onLine)return;purgado=true;
+  const lim=Date.now()-DIAS_PAPELERA*864e5;
+  for(const p of S.papelera.filter(x=>(x.borrado||0)<lim))await borrarDefinitivo(p.id);
+}
+function papeleraCard(){
+  const list=[...S.papelera].sort((a,b)=>(b.borrado||0)-(a.borrado||0));
+  const ic2={prenda:'Prenda',lote:'Lote',venta:'Venta',caja:'Movimiento de caja'};
+  const dias=p=>Math.max(0,DIAS_PAPELERA-Math.floor((Date.now()-(p.borrado||0))/864e5));
+  return `<div class="card" id="papelera"><div class="card-h"><h2>Papelera</h2><span class="grow"></span><span class="chip">${list.length}</span></div>
+    <p class="hint" style="margin:0 0 8px">Lo que borras queda aquí ${DIAS_PAPELERA} días, con sus fotos. Después se elimina solo.</p>
+    ${list.length?`<div class="list">${list.map(p=>{const f=fotosDe(p)[0];return `<div class="li">
+      <div class="thumb">${photoTag(f)}</div>
+      <div style="min-width:0"><div class="t">${esc(p.titulo)}</div><div class="m">${ic2[p.tipo]||p.tipo} · borrado ${new Date(p.borrado).toLocaleDateString('es-CO',{day:'numeric',month:'short'})}${p.por?' por '+esc(p.por):''} · quedan ${dias(p)} días</div></div>
+      <div class="r" style="display:flex;gap:6px"><button class="btn sm primary" data-act="pap-rest" data-id="${esc(p.id)}">Restaurar</button><button class="icon-btn" data-act="pap-del" data-id="${esc(p.id)}" aria-label="Borrar para siempre" title="Borrar para siempre">${ic(IC.trash)}</button></div></div>`}).join('')}</div>`
+    :`<div class="empty" style="padding:16px">La papelera está vacía.</div>`}</div>`;
 }
 
 /* ---------- modals ---------- */
@@ -1026,10 +1087,14 @@ function itemModal(key){
     if(act==='vender'){m.close();ventaModal([key])}
     if(act==='lote'){m.close();loteModal(it0.loteId)}
     if(act==='del'){
-      if(!(await confirmBox(`¿Borrar <b>${esc(st.articulo)}</b> (${esc(st.talla)}) del lote?`)))return;
+      if(!(await confirmBox(`¿Borrar <b>${esc(st.articulo)}</b> (${esc(st.talla)}) del lote? Quedará ${DIAS_PAPELERA} días en la papelera por si la necesitas.`)))return;
       if(!canWrite())return;
-      const l=structuredClone(lote());l.items=l.items.filter(x=>x.id!==it0.id);finishLote(l);const {id,...data}=l;
-      if(await write(()=>db.collection('lotes').doc(id).set(data))){m.close();toast('Prenda borrada','good');if(assets)for(const f of st.fotos)if(!fotoEnUso(f,key))assets.delete(f).catch(()=>{})}
+      const l=structuredClone(lote());const pos=l.items.findIndex(x=>x.id===it0.id);const item=structuredClone(l.items[pos]);
+      const titulo=`${item.marca?item.marca+' · ':''}${item.articulo} (${item.talla})`;
+      const pid=await aPapelera('prenda',{loteId:l.id,loteNombre:l.nombre,pos,item},titulo);if(!pid)return;
+      l.items.splice(pos,1);finishLote(l);const {id,...data}=l;
+      if(await write(()=>db.collection('lotes').doc(id).set(data))){m.close();toastAction('Prenda enviada a la papelera','Deshacer',()=>restaurar(pid))}
+      else await write(()=>db.collection('papelera').doc(pid).delete());
     }
   });
   m.onData=()=>{if(!D.byKey.get(key)){m.close();return}calc()};
@@ -1127,9 +1192,10 @@ function loteModal(id){
     if(act==='del'){
       const used=S.ventas.some(v=>(v.items||[]).some(i=>i.loteId===orig.id));
       if(used){toast('Este lote tiene ventas registradas. Borra esas ventas primero.','bad');return}
-      if(!(await confirmBox(`¿Borrar el lote <b>${esc(orig.nombre)}</b> con sus ${rows.length} prendas? No se puede deshacer.`)))return;
+      if(!(await confirmBox(`¿Borrar el lote <b>${esc(orig.nombre)}</b> con sus ${rows.length} prendas? Quedará ${DIAS_PAPELERA} días en la papelera.`)))return;
       if(!canWrite())return;
-      if(await write(()=>db.collection('lotes').doc(orig.id).delete())){m.close();toast('Lote borrado','good')}
+      const lo=structuredClone(S.lotes.find(l=>l.id===orig.id));const pid=await aPapelera('lote',lo,`Lote ${lo.nombre}`);if(!pid)return;
+      if(await write(()=>db.collection('lotes').doc(orig.id).delete())){m.close();toastAction('Lote enviado a la papelera','Deshacer',()=>restaurar(pid))}
     }
     if(act==='save'){
       if(busy||!canWrite())return;
@@ -1151,10 +1217,12 @@ function loteModal(id){
       if(JSON.stringify(doc).length>240000){toast('El lote tiene demasiadas prendas. Divídelo en dos lotes.','bad');return}
       busy=true;$('#lm-save',m.body).disabled=true;$('#lm-save',m.body).textContent='Guardando…';
       const lid=orig?orig.id:newId('lotes');
+      const quitados=orig?(S.lotes.find(l=>l.id===orig.id)||orig).items.map((it,pos)=>({it,pos})).filter(x=>!keep.some(r=>r.id===x.it.id)):[];
+      for(const q of quitados){if(!(await aPapelera('prenda',{loteId:lid,loteNombre:doc.nombre,pos:q.pos,item:structuredClone(q.it)},`${q.it.marca?q.it.marca+' · ':''}${q.it.articulo} (${q.it.talla})`))){busy=false;$('#lm-save',m.body).disabled=false;$('#lm-save',m.body).textContent='Guardar lote';return}}
       const ok=await write(()=>db.collection('lotes').doc(lid).set(doc));
       busy=false;
       if(ok){
-        m.close();toast(orig?'Lote actualizado':`Lote guardado: ${doc.unidades} prendas al inventario`,'good');
+        m.close();toast(orig?(quitados.length?`Lote actualizado. ${quitados.length} prenda(s) quitada(s) quedaron en la papelera.`:'Lote actualizado'):`Lote guardado: ${doc.unidades} prendas al inventario`,'good');
         const patch={};if(doc.dolar!==S.config.dolar)patch.dolar=doc.dolar;if(doc.impPct!==S.config.impPct)patch.impPct=doc.impPct;if(aum&&aum!==S.config.aumento)patch.aumento=aum;
         if(Object.keys(patch).length)saveConfig(patch);
       }else{$('#lm-save',m.body).disabled=false;$('#lm-save',m.body).textContent='Guardar lote'}
@@ -1290,7 +1358,7 @@ function ventaDetalle(id,fallback){
       if(await saveV(nv)){ab.monto='';toast(monto>=s?'Factura pagada por completo':`Abono guardado. Queda debiendo ${cop(s-monto)}`,'good')}
     }
     if(act==='del-ab'){if(!(await confirmBox('¿Borrar este abono?')))return;if(!canWrite())return;const nv=structuredClone(v);nv.abonos=(nv.abonos||[]).filter(x=>x.id!==a.dataset.id);if(await saveV(nv))toast('Abono borrado','good')}
-    if(act==='del'){if(!(await confirmBox(`¿Borrar la factura #${v.factura}? Las prendas vuelven al inventario y los abonos salen de la caja.`)))return;if(!canWrite())return;if(await write(()=>db.collection('ventas').doc(id).delete())){m.close();toast('Venta borrada','good')}}
+    if(act==='del'){if(!(await confirmBox(`¿Borrar la factura #${v.factura}? Las prendas vuelven al inventario y los abonos salen de la caja.`)))return;if(!canWrite())return;const pid=await aPapelera('venta',structuredClone(v),`Factura #${v.factura} · ${(v.cliente&&v.cliente.nombre)||'Cliente de mostrador'}`);if(!pid)return;if(await write(()=>db.collection('ventas').doc(id).delete())){m.close();toastAction('Venta enviada a la papelera','Deshacer',()=>restaurar(pid))}}
     if(act==='copiar'){
       const s=saldoVenta(v);const txt=`*${cfg('negocio')}* · Factura #${v.factura}\n${fmtF(v.fecha)}\nCliente: ${(v.cliente&&v.cliente.nombre)||'Cliente de mostrador'}\n\n${(v.items||[]).map(i=>`${i.cant} × ${i.marca?i.marca+' ':''}${i.desc} (${i.talla}) — ${cop(i.precio*i.cant)}`).join('\n')}\n${v.descuento?`Descuento: −${cop(v.descuento)}\n`:''}*Total: ${cop(v.total)}*\n${s>0?`Abonado: ${cop(abonado(v))}\n*Saldo pendiente: ${cop(s)}*`:'Pagada ✓'}`;
       try{await navigator.clipboard.writeText(txt);toast('Texto copiado. Pégalo en WhatsApp.','good')}catch(err){toast('No se pudo copiar en esta vista.','bad')}
@@ -1342,7 +1410,7 @@ async function expXlsx(){
   const out=X.write(wb,{bookType:'xlsx',type:'array'});
   await save(`trending-store-${stamp()}.xlsx`,new Uint8Array(out));
 }
-async function expJson(){await save(`trending-store-copia-${stamp()}.json`,JSON.stringify({exportado:new Date().toISOString(),config:S.config,lotes:S.lotes,ventas:S.ventas,caja:S.caja},null,1))}
+async function expJson(){await save(`trending-store-copia-${stamp()}.json`,JSON.stringify({exportado:new Date().toISOString(),config:S.config,lotes:S.lotes,ventas:S.ventas,caja:S.caja,papelera:S.papelera},null,1))}
 function thumbData(id){return new Promise(res=>{const img=new Image();img.crossOrigin='anonymous';img.onload=()=>{try{const s=220,r=Math.min(1,s/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*r);c.height=Math.round(img.naturalHeight*r);c.getContext('2d').drawImage(img,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.72))}catch(e){res(null)}};img.onerror=()=>res(null);img.src=blobUrl(id)})}
 async function expHtml(btn){
   const items=[...D.disp].sort((a,b)=>a.marca.localeCompare(b.marca)||a.articulo.localeCompare(b.articulo));
@@ -1375,7 +1443,9 @@ document.addEventListener('click',async e=>{
     if(await write(()=>db.collection('caja').doc(newId('caja')).set(doc))){S.cajaForm={...f,desc:'',monto:''};toast(`${f.tipo==='salida'?'Salida':'Entrada'} guardada: ${cop(monto)}`,'good');paint()}
     a.disabled=false;
   }
-  else if(act==='caja-del'){if(!(await confirmBox('¿Borrar este movimiento de caja?')))return;if(!canWrite())return;if(await write(()=>db.collection('caja').doc(a.dataset.id).delete()))toast('Movimiento borrado','good')}
+  else if(act==='caja-del'){if(!(await confirmBox('¿Borrar este movimiento de caja?')))return;if(!canWrite())return;const c=S.caja.find(x=>x.id===a.dataset.id);if(!c)return;const pid=await aPapelera('caja',structuredClone(c),`${c.desc||c.cat} · ${cop(c.monto)}`);if(!pid)return;if(await write(()=>db.collection('caja').doc(c.id).delete()))toastAction('Movimiento enviado a la papelera','Deshacer',()=>restaurar(pid))}
+  else if(act==='pap-rest'){a.disabled=true;await restaurar(a.dataset.id);a.disabled=false}
+  else if(act==='pap-del'){if(!(await confirmBox('¿Borrar esto para siempre? Sus fotos también se eliminan y ya no se podrá recuperar.','Borrar para siempre')))return;if(!canWrite())return;if(await borrarDefinitivo(a.dataset.id))toast('Eliminado para siempre','good')}
   else if(act==='cfg-save'){
     if(!canWrite())return;const patch={};
     document.querySelectorAll('[data-cfg]').forEach(i=>{const k=i.dataset.cfg;const v=i.value.trim();if(['dolar','impPct','aumento','facturaInicial','cajaInicial'].includes(k)){if(v==='')patch[k]='';else patch[k]=parseNum(v)}else patch[k]=v});
