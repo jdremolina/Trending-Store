@@ -709,8 +709,8 @@ function chartSVG({labels,a,b,every}){
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ventas y ganancia del periodo">${g}${bars}</svg>`;
 }
 
-function invFiltered(){
-  const f=S.inv,q=norm(f.q);
+function invFiltered(ignorarEstado){
+  const f=ignorarEstado?{...S.inv,estado:'todas'}:S.inv,q=norm(f.q);
   let it=D.items.filter(i=>{
     if(f.estado==='disp'&&i.stock<=0)return false;
     if(f.estado==='vend'&&i.stock>0)return false;
@@ -749,7 +749,7 @@ function vInventario(){
       <label class="sr" for="inv-orden">Orden</label><select id="inv-orden" data-inv="orden"><option value="lote" ${f.orden==='lote'?'selected':''}>Por lote</option><option value="marca" ${f.orden==='marca'?'selected':''}>Por marca</option><option value="precio" ${f.orden==='precio'?'selected':''}>Mayor precio</option><option value="ganancia" ${f.orden==='ganancia'?'selected':''}>Mayor ganancia</option></select>
       <div class="seg" role="group" aria-label="Vista"><button data-act="modo" data-m="fotos" aria-pressed="${f.modo==='fotos'}" title="Fotos">${ic(IC.grid)}</button><button data-act="modo" data-m="lista" aria-pressed="${f.modo==='lista'}" title="Lista">${ic(IC.rows)}</button></div>
     </div>
-    <p class="hint">${list.length} resultado${list.length===1?'':'s'}${sinFoto?` · ${sinFoto} prendas disponibles sin foto: tócalas para agregarla`:''}${S.papelera.length?` · <a href="#ajustes" class="gold">Papelera (${S.papelera.length})</a>`:''}</p>
+    <p class="hint" style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center"><span>${list.length} resultado${list.length===1?'':'s'}${sinFoto?` · ${sinFoto} prendas disponibles sin foto: tócalas para agregarla`:''}${S.papelera.length?` · <a href="#ajustes" class="gold">Papelera (${S.papelera.length})</a>`:''}</span>${(f.q||f.marca||f.lote)&&list.length?`<button class="btn sm" data-act="cambiar-marca">Cambiar marca de estos resultados</button>`:''}</p>
   </div>
   ${seedCard()}
   ${!list.length?`<div class="card empty"><img src="${MONO}" alt="">${D.items.length?'Nada coincide con esos filtros.':'Todavía no hay prendas. Registra tu primer lote de USA para llenar el inventario.'}${D.items.length?'':`<button class="btn primary" data-act="nuevo-lote">${ic(IC.plus)}Nuevo lote</button>`}</div>`
@@ -911,6 +911,49 @@ async function importJson(file){
     await loadAll();toast(`Listo: ${n('lotes')} lotes importados`,'good');
   }catch(e){console.error(e);toast('No se pudo importar: '+(e.message||'revisa tu internet'),'bad')}
 }
+
+/* ---------- cambiar marca de varias prendas ---------- */
+function marcaMasivaModal(){
+  const items=invFiltered(true);if(!items.length)return;
+  const sel=new Set(items.map(i=>i.key));let nueva='',ventasTambien=true,busy=false;
+  const m=openModal('Cambiar marca de varias prendas','wide');
+  const draw=()=>{withFocus(m.body,()=>{const n=sel.size;m.body.innerHTML=`
+    <p style="margin:0">Estas son las prendas de tu búsqueda (disponibles y vendidas). Desmarca las que <b>no</b> quieras cambiar.</p>
+    <div class="row2"><div class="fld"><label for="mm-marca">Marca nueva</label><input id="mm-marca" list="dl-marcas" value="${esc(nueva)}" placeholder="Ej: JORDAN" autocomplete="off"></div>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:600;align-self:end;min-height:40px"><input type="checkbox" id="mm-ventas" ${ventasTambien?'checked':''}> Cambiarla también en las ventas ya registradas</label></div>
+    <div class="quick"><button class="btn sm" data-a="todas">Marcar todas</button><button class="btn sm" data-a="ninguna">Desmarcar todas</button><span class="hint" style="margin:0;align-self:center">${n} de ${items.length} seleccionadas</span></div>
+    <div class="tw" style="max-height:46vh;overflow:auto"><table class="tbl"><tbody>${items.map(i=>`<tr class="click" data-a="tog" data-k="${esc(i.key)}"><td style="width:36px"><input type="checkbox" tabindex="-1" ${sel.has(i.key)?'checked':''} aria-label="Seleccionar"></td><td><div class="thumb">${photoTag(i.foto)}</div></td><td><div class="gold" style="font-size:11px;font-weight:800;letter-spacing:.1em">${esc(i.marca)}</div>${esc(i.articulo)}</td><td>${esc(i.talla)}</td><td class="muted">${esc(i.loteNombre)}</td><td>${i.stock<=0?'<span class="chip bad">Vendida</span>':''}</td></tr>`).join('')}</tbody></table></div>
+    ${dlMarcas()}
+    <div class="sheet-f"><span class="grow"></span><button class="btn ghost" data-a="cancel">Cancelar</button><button class="btn primary" data-a="ok" ${busy?'disabled':''}>${busy?'Guardando…':`Cambiar ${n} prenda${n===1?'':'s'}`}</button></div>`})};
+  draw();
+  m.body.addEventListener('input',e=>{if(e.target.id==='mm-marca')nueva=e.target.value});
+  m.body.addEventListener('change',e=>{if(e.target.id==='mm-ventas')ventasTambien=e.target.checked});
+  m.body.addEventListener('click',async e=>{
+    const a=e.target.closest('[data-a]');if(!a)return;const act=a.dataset.a;
+    if(act==='tog'){const k=a.dataset.k;sel.has(k)?sel.delete(k):sel.add(k);draw()}
+    if(act==='todas'){items.forEach(i=>sel.add(i.key));draw()}
+    if(act==='ninguna'){sel.clear();draw()}
+    if(act==='cancel')m.close();
+    if(act==='ok'){
+      const marca=ALIAS_MARCA(nueva.trim().toUpperCase());
+      if(!marca){toast('Escribe la marca nueva.','bad');$('#mm-marca',m.body).focus();return}
+      if(!sel.size){toast('Selecciona al menos una prenda.','bad');return}
+      if(!canWrite()||busy)return;busy=true;draw();
+      const porLote=new Map();for(const k of sel){const[l,i]=k.split('|');if(!porLote.has(l))porLote.set(l,new Set());porLote.get(l).add(i)}
+      let ok=true,n=0;
+      for(const[lid,ids]of porLote){const l=structuredClone(S.lotes.find(x=>x.id===lid));if(!l)continue;
+        for(const it of l.items)if(ids.has(it.id)&&it.marca!==marca){it.marca=marca;n++}
+        const{id,...data}=l;if(!(await write(()=>db.collection('lotes').doc(id).set(data)))){ok=false;break}}
+      let nv=0;
+      if(ok&&ventasTambien)for(const v of S.ventas){if(!(v.items||[]).some(i=>sel.has(i.loteId+'|'+i.itemId)&&i.marca!==marca))continue;
+        const c=structuredClone(v);c.items.forEach(i=>{if(sel.has(i.loteId+'|'+i.itemId))i.marca=marca});const{id,...data}=c;
+        if(!(await write(()=>db.collection('ventas').doc(id).set(data)))){ok=false;break}nv++}
+      busy=false;
+      if(ok){m.close();toast(`Listo: ${n} prenda(s) ahora son ${marca}${nv?` y se actualizaron ${nv} venta(s)`:''}`,'good')}else draw();
+    }
+  });
+}
+const ALIAS_MARCA=m=>({'KARL LG':'KARL LAGERFELD','MK':'MICHAEL KORS','PSYCHO B':'PSYCHO BUNNY'}[m]||m);
 
 /* ---------- papelera ---------- */
 const DIAS_PAPELERA=30;
@@ -1433,6 +1476,7 @@ document.addEventListener('click',async e=>{
   else if(act==='ver-lote')loteModal(a.dataset.id);
   else if(act==='ver-cliente')clienteModal(a.dataset.n);
   else if(act==='modo'){S.inv.modo=a.dataset.m;paint()}
+  else if(act==='cambiar-marca')marcaMasivaModal();
   else if(act==='caja-tipo'){S.cajaForm.tipo=a.dataset.t;S.cajaForm.cat=a.dataset.t==='salida'?CAT_SALIDA[0][0]:CAT_ENTRADA[0];paint()}
   else if(act==='caja-add'){
     const f=S.cajaForm;const monto=Math.round(parseNum(f.monto));
