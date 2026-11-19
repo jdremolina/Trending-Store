@@ -155,6 +155,11 @@ button.li:hover{background:var(--surface-2)}
 .day-h{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);font-weight:700;padding:14px 4px 4px}
 
 /* Inventory grid */
+.sec-tabs{display:flex;gap:8px;flex-wrap:wrap}
+.sec-tabs button{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);padding:9px 16px;border-radius:999px;font-weight:700;cursor:pointer;font-size:14.5px}
+.sec-tabs button span{background:var(--surface-2);color:var(--muted);border-radius:999px;padding:1px 8px;font-size:12px;font-variant-numeric:tabular-nums}
+.sec-tabs button[aria-selected="true"]{border-color:var(--gold);background:var(--gold-soft);color:var(--gold)}
+.sec-tabs button[aria-selected="true"] span{background:var(--gold);color:#111}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .toolbar input[type="search"]{flex:1;min-width:200px}
 .toolbar select{width:auto}
@@ -372,7 +377,7 @@ function loadScript(src){return new Promise((ok,no)=>{const s=document.createEle
 
 /* ---------- state ---------- */
 const S={lotes:[],ventas:[],caja:[],papelera:[],config:{},got:{},ok:{},status:'conectando',slow:false,online:navigator.onLine,
-  view:'resumen',per:null,inv:{q:'',lote:'',marca:'',talla:'',estado:'disp',modo:'fotos',orden:'lote'},
+  view:'resumen',per:null,inv:{q:'',sec:'',lote:'',marca:'',talla:'',estado:'disp',modo:'fotos',orden:'lote'},
   cajaForm:{tipo:'salida',cat:'Pago empleados',desc:'',monto:'',fecha:hoy()},ventasQ:''};
 (function(){const d=new Date();S.per={tipo:'mes',y:d.getFullYear(),m:d.getMonth()+1}})();
 let assets=null,downloads=null,sb=null;
@@ -381,6 +386,13 @@ const SB_URL=String(CFG.supabaseUrl||'').replace(/\/rest\/v1\/?$/,'').replace(/\
 const D={}; // derived
 const cfg=k=>{const d={impPct:7,dolar:4000,aumento:130000,facturaInicial:1,cajaInicial:0,negocio:'Trending Store',ciudad:'',whatsapp:'',instagram:'',nit:''};return S.config[k]!==undefined&&S.config[k]!==''?S.config[k]:d[k]};
 
+const SECCIONES=['Superiores','Inferiores','Gorras','Accesorios'];
+function seccionAuto(articulo){const a=norm(articulo);
+  if(/(^|\s)(gorra|gora|cap|visera|sombrero|bucket)/.test(a))return 'Gorras';
+  if(/pantal|jogger|short|sudadera|bermuda|jean|legging|falda|calzon|boxer/.test(a))return 'Inferiores';
+  if(/correa|cinturon|billetera|bolso|morral|gafas|reloj|medias|calcetin|perfume|loción|locion|termo|stanley/.test(a))return 'Accesorios';
+  return 'Superiores'}
+const seccionDe=it=>SECCIONES.includes(it.seccion)?it.seccion:seccionAuto(it.articulo);
 function derive(){
   const vend=new Map();
   for(const v of S.ventas)for(const it of v.items||[]){const k=it.loteId+'|'+it.itemId;vend.set(k,(vend.get(k)||0)+(+it.cant||0))}
@@ -391,7 +403,7 @@ function derive(){
   lotes.forEach((l,li)=>{(l.items||[]).forEach((it,ii)=>{
     const key=l.id+'|'+it.id;const vApp=vend.get(key)||0;
     const stock=(+it.cant||0)-(+it.prevVend||0)-vApp;
-    items.push({...it,loteId:l.id,loteNombre:l.nombre,key,vApp,stock,ord:li*10000+ii});
+    items.push({...it,loteId:l.id,loteNombre:l.nombre,key,vApp,stock,ord:li*10000+ii,sec:seccionDe(it)});
   })});
   D.items=items;D.byKey=new Map(items.map(i=>[i.key,i]));
   D.marcas=[...new Set(items.map(i=>i.marca).filter(Boolean))].sort();
@@ -714,6 +726,7 @@ function invFiltered(ignorarEstado){
   let it=D.items.filter(i=>{
     if(f.estado==='disp'&&i.stock<=0)return false;
     if(f.estado==='vend'&&i.stock>0)return false;
+    if(f.sec&&i.sec!==f.sec)return false;
     if(f.lote&&i.loteId!==f.lote)return false;
     if(f.marca&&i.marca!==f.marca)return false;
     if(f.talla&&i.talla!==f.talla)return false;
@@ -726,6 +739,9 @@ function invFiltered(ignorarEstado){
 }
 function vInventario(){
   const f=S.inv,list=invFiltered();
+  const enEstado=D.items.filter(i=>f.estado==='disp'?i.stock>0:f.estado==='vend'?i.stock<=0:true);
+  const nSec=s=>enEstado.filter(i=>i.sec===s).length;
+  const secTabs=`<div class="sec-tabs" role="tablist" aria-label="Secciones">${[['','Todo',enEstado.length],...SECCIONES.map(s=>[s,s,nSec(s)]).filter(x=>x[2]>0||x[0]===f.sec)].map(([v,l,n])=>`<button role="tab" aria-selected="${f.sec===v}" data-act="sec" data-s="${esc(v)}">${l}<span>${n}</span></button>`).join('')}</div>`;
   const sinFoto=D.disp.filter(i=>!i.foto).length;
   const stockChip=i=>i.stock<=0?'<span class="chip bad">Vendida</span>':i.stock>1?`<span class="chip ok">${i.stock} disp.</span>`:'';
   const card=i=>`<button class="pcard ${i.stock<=0?'sold':''}" data-act="item" data-k="${esc(i.key)}">
@@ -739,6 +755,7 @@ function vInventario(){
   return `
   <div class="page-h"><div><div class="eyebrow">${int(D.unidades)} prendas disponibles · ${cop(D.valorVenta)} a precio de venta</div><h1>Inventario</h1></div><span class="grow"></span>
     <button class="btn" data-act="nuevo-lote">${ic(IC.plus)}Nuevo lote</button><button class="btn primary" data-act="nueva-venta">${ic(IC.plus)}Vender</button></div>
+  ${secTabs}
   <div class="card">
     <div class="toolbar">
       <label class="sr" for="inv-q">Buscar</label><input id="inv-q" type="search" data-inv="q" value="${esc(f.q)}" placeholder="Buscar marca, prenda, referencia…" autocomplete="off">
@@ -749,7 +766,7 @@ function vInventario(){
       <label class="sr" for="inv-orden">Orden</label><select id="inv-orden" data-inv="orden"><option value="lote" ${f.orden==='lote'?'selected':''}>Por lote</option><option value="marca" ${f.orden==='marca'?'selected':''}>Por marca</option><option value="precio" ${f.orden==='precio'?'selected':''}>Mayor precio</option><option value="ganancia" ${f.orden==='ganancia'?'selected':''}>Mayor ganancia</option></select>
       <div class="seg" role="group" aria-label="Vista"><button data-act="modo" data-m="fotos" aria-pressed="${f.modo==='fotos'}" title="Fotos">${ic(IC.grid)}</button><button data-act="modo" data-m="lista" aria-pressed="${f.modo==='lista'}" title="Lista">${ic(IC.rows)}</button></div>
     </div>
-    <p class="hint" style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center"><span>${list.length} resultado${list.length===1?'':'s'}${sinFoto?` · ${sinFoto} prendas disponibles sin foto: tócalas para agregarla`:''}${S.papelera.length?` · <a href="#ajustes" class="gold">Papelera (${S.papelera.length})</a>`:''}</span>${(f.q||f.marca||f.lote)&&list.length?`<button class="btn sm" data-act="cambiar-marca">Cambiar marca de estos resultados</button>`:''}</p>
+    <p class="hint" style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center"><span>${list.length} resultado${list.length===1?'':'s'}${sinFoto?` · ${sinFoto} prendas disponibles sin foto: tócalas para agregarla`:''}${S.papelera.length?` · <a href="#ajustes" class="gold">Papelera (${S.papelera.length})</a>`:''}</span>${(f.q||f.marca||f.lote||f.sec)&&list.length?`<button class="btn sm" data-act="cambiar-marca">Cambiar marca de estos resultados</button>`:''}</p>
   </div>
   ${seedCard()}
   ${!list.length?`<div class="card empty"><img src="${MONO}" alt="">${D.items.length?'Nada coincide con esos filtros.':'Todavía no hay prendas. Registra tu primer lote de USA para llenar el inventario.'}${D.items.length?'':`<button class="btn primary" data-act="nuevo-lote">${ic(IC.plus)}Nuevo lote</button>`}</div>`
@@ -1054,7 +1071,7 @@ const photoErr=e=>{const c=e&&e.code;console.error('foto',e);return c==='too_lar
 function itemModal(key){
   const it0=D.byKey.get(key);if(!it0)return;
   const lote0=S.lotes.find(l=>l.id===it0.loteId);if(!lote0)return;
-  const st={marca:it0.marca||'',articulo:it0.articulo||'',ref:it0.ref||'',talla:it0.talla||'',cant:String(it0.cant??1),usd:String(it0.usd??''),desc:String(it0.desc||0),precio:it0.precio?int(it0.precio):'',fotos:[it0.foto,...(it0.fotosExtra||[])].filter(Boolean),sel:0};
+  const st={seccion:SECCIONES.includes(it0.seccion)?it0.seccion:'',marca:it0.marca||'',articulo:it0.articulo||'',ref:it0.ref||'',talla:it0.talla||'',cant:String(it0.cant??1),usd:String(it0.usd??''),desc:String(it0.desc||0),precio:it0.precio?int(it0.precio):'',fotos:[it0.foto,...(it0.fotosExtra||[])].filter(Boolean),sel:0};
   const m=openModal('Prenda','wide');let busy=false,upl=false;
   const lote=()=>S.lotes.find(l=>l.id===it0.loteId)||lote0;
   const calc=()=>{
@@ -1081,6 +1098,7 @@ function itemModal(key){
         <div class="fld"><label for="im-art">Prenda</label><input id="im-art" data-f="articulo" value="${esc(st.articulo)}"></div>
         <div class="row4"><div class="fld"><label for="im-talla">Talla</label><input id="im-talla" data-f="talla" list="dl-tallas" value="${esc(st.talla)}"></div><div class="fld"><label for="im-cant">Cantidad comprada</label><input id="im-cant" data-f="cant" inputmode="numeric" value="${esc(st.cant)}"></div>
           <div class="fld"><label for="im-usd">Precio USA (US$)</label><input id="im-usd" data-f="usd" inputmode="decimal" value="${esc(st.usd)}"></div><div class="fld"><label for="im-desc">Descuento %</label><input id="im-desc" data-f="desc" inputmode="decimal" value="${esc(st.desc)}"></div></div>
+        <div class="fld"><label for="im-sec">Sección</label><select id="im-sec" data-f="seccion"><option value="" ${!st.seccion?'selected':''}>Automática (${seccionAuto(st.articulo)})</option>${SECCIONES.map(s=>`<option ${st.seccion===s?'selected':''}>${s}</option>`).join('')}</select></div>
         <div class="fld"><label for="im-precio">Precio de venta (COP)</label><input id="im-precio" data-f="precio" data-money inputmode="numeric" value="${esc(st.precio)}"></div>
         <div class="calc-box" id="im-calc"></div>
         ${(+it0.prevVend||0)?`<p class="hint">${it0.prevVend} vendida(s) antes de usar la app${it0.prevCliente?' a '+esc(it0.prevCliente):''}.</p>`:''}
@@ -1096,6 +1114,7 @@ function itemModal(key){
     </div>`});calc()};
   draw();
   m.body.addEventListener('input',e=>{const f=e.target.dataset.f;if(f){st[f]=e.target.value;calc()}});
+  m.body.addEventListener('change',e=>{if(e.target.id==='im-sec')st.seccion=e.target.value});
   m.body.addEventListener('change',async e=>{
     if(e.target.id!=='im-file'||!e.target.files.length)return;
     const files=[...e.target.files];upl=true;draw();let n=0;
@@ -1110,7 +1129,7 @@ function itemModal(key){
     const minC=(+cur.prevVend||0)+(cur.vApp||0);
     if(cant<minC){toast(`La cantidad no puede ser menor que lo vendido (${minC}).`,'bad');return false}
     if(!st.articulo.trim()){toast('Escribe el nombre de la prenda.','bad');return false}
-    Object.assign(l.items[i],{marca:st.marca.trim().toUpperCase(),articulo:st.articulo.trim(),ref:st.ref.trim(),talla:(st.talla.trim()||'ÚNICA').toUpperCase(),cant,usd:parseNum(st.usd),desc:parseNum(st.desc),precio:Math.round(parseNum(st.precio)),foto:st.fotos[0]||null,fotosExtra:st.fotos.slice(1)});
+    Object.assign(l.items[i],{seccion:st.seccion||null,marca:st.marca.trim().toUpperCase(),articulo:st.articulo.trim(),ref:st.ref.trim(),talla:(st.talla.trim()||'ÚNICA').toUpperCase(),cant,usd:parseNum(st.usd),desc:parseNum(st.desc),precio:Math.round(parseNum(st.precio)),foto:st.fotos[0]||null,fotosExtra:st.fotos.slice(1)});
     finishLote(l);
     const {id,...data}=l;
     const ok=await write(()=>db.collection('lotes').doc(id).set(data));
@@ -1156,9 +1175,9 @@ function loteModal(id){
   const orig=id?S.lotes.find(l=>l.id===id):null;if(id&&!orig)return;
   const L=orig?{nombre:orig.nombre||'',fecha:orig.fecha||'',proveedor:orig.proveedor||'',dolar:int(orig.dolar),impPct:String(orig.impPct??7),envio:orig.envio!=null?String(orig.envio):(orig.envioCOP?int(orig.envioCOP):''),envioMon:orig.envioMon||'COP',otrosCOP:orig.otrosCOP?int(orig.otrosCOP):'',reparto:orig.reparto||'valor',aumento:orig.aumento?int(orig.aumento):'',pagado:!!orig.pagado,nota:orig.nota||''}
     :{nombre:`SN°${S.lotes.length+1} `,fecha:hoy(),proveedor:'',dolar:int(cfg('dolar')),impPct:String(cfg('impPct')),envio:'',envioMon:'USD',otrosCOP:'',reparto:'valor',aumento:int(cfg('aumento')),pagado:true,nota:''};
-  const rows=orig?(orig.items||[]).map(it=>({id:it.id,marca:it.marca||'',articulo:it.articulo||'',ref:it.ref||'',talla:it.talla||'',cant:String(it.cant??1),usd:String(it.usd??''),desc:it.desc?String(it.desc):'',precio:it.precio?int(it.precio):'',foto:it.foto||null,fotosExtra:it.fotosExtra||[],prevVend:+it.prevVend||0,prevCliente:it.prevCliente||'',sold:(+it.prevVend||0)+(D.vend.get(orig.id+'|'+it.id)||0),hasApp:(D.vend.get(orig.id+'|'+it.id)||0)>0}))
+  const rows=orig?(orig.items||[]).map(it=>({id:it.id,marca:it.marca||'',articulo:it.articulo||'',ref:it.ref||'',talla:it.talla||'',cant:String(it.cant??1),usd:String(it.usd??''),desc:it.desc?String(it.desc):'',precio:it.precio?int(it.precio):'',foto:it.foto||null,fotosExtra:it.fotosExtra||[],seccion:it.seccion||null,prevVend:+it.prevVend||0,prevCliente:it.prevCliente||'',sold:(+it.prevVend||0)+(D.vend.get(orig.id+'|'+it.id)||0),hasApp:(D.vend.get(orig.id+'|'+it.id)||0)>0}))
     :[newRow()];
-  function newRow(from){return{id:uid(),marca:from?from.marca:'',articulo:from?from.articulo:'',ref:'',talla:'',cant:'1',usd:from?from.usd:'',desc:from?from.desc:'',precio:from?from.precio:'',foto:from?from.foto:null,fotosExtra:from?[...(from.fotosExtra||[])]:[],prevVend:0,prevCliente:'',sold:0,hasApp:false}}
+  function newRow(from){return{id:uid(),marca:from?from.marca:'',articulo:from?from.articulo:'',ref:'',talla:'',cant:'1',usd:from?from.usd:'',desc:from?from.desc:'',precio:from?from.precio:'',foto:from?from.foto:null,fotosExtra:from?[...(from.fotosExtra||[])]:[],seccion:from?from.seccion||null:null,prevVend:0,prevCliente:'',sold:0,hasApp:false}}
   const m=openModal(orig?orig.nombre:'Nuevo lote de Estados Unidos','xwide');let busy=false;
   const provs=[...new Set(S.lotes.map(l=>l.proveedor).filter(Boolean))];
   const stats=orig?loteStats(orig):null;
@@ -1254,7 +1273,7 @@ function loteModal(id){
       const aum=parseNum(L.aumento);
       const doc={nombre:L.nombre.trim(),fecha:L.fecha||'',proveedor:L.proveedor.trim(),dolar:parseNum(L.dolar),impPct:parseNum(L.impPct),envio:parseNum(L.envio),envioMon:L.envioMon,otrosCOP:Math.round(parseNum(L.otrosCOP)),reparto:L.reparto,aumento:Math.round(aum),pagado:!!L.pagado,nota:L.nota.trim(),
         importado:orig?!!orig.importado:false,creado:orig?(orig.creado||Date.now()):Date.now(),actualizado:Date.now(),
-        items:keep.map(r=>({id:r.id,marca:r.marca.trim().toUpperCase(),articulo:r.articulo.trim(),ref:r.ref.trim(),talla:(r.talla.trim()||'ÚNICA').toUpperCase(),cant:Math.round(parseNum(r.cant)),usd:parseNum(r.usd),desc:parseNum(r.desc),precio:0,foto:r.foto||null,fotosExtra:r.fotosExtra||[],prevVend:r.prevVend||0,prevCliente:r.prevCliente||''}))};
+        items:keep.map(r=>({id:r.id,marca:r.marca.trim().toUpperCase(),articulo:r.articulo.trim(),ref:r.ref.trim(),talla:(r.talla.trim()||'ÚNICA').toUpperCase(),cant:Math.round(parseNum(r.cant)),usd:parseNum(r.usd),desc:parseNum(r.desc),precio:0,foto:r.foto||null,fotosExtra:r.fotosExtra||[],seccion:r.seccion||null,prevVend:r.prevVend||0,prevCliente:r.prevCliente||''}))};
       finishLote(doc);
       doc.items.forEach((it,i)=>{const r=keep[i];it.precio=Math.round(r.precio.trim()?parseNum(r.precio):sugerido(it.costo,aum))});
       if(JSON.stringify(doc).length>240000){toast('El lote tiene demasiadas prendas. Divídelo en dos lotes.','bad');return}
@@ -1442,8 +1461,8 @@ async function expXlsx(){
   try{if(!window.XLSX)await loadScript(XLSX_SRC)}catch(e){toast('No se pudo cargar el generador de Excel. Revisa tu internet.','bad');return}
   const X=window.XLSX,wb=X.utils.book_new();
   const add=(name,rows,widths)=>{const ws=X.utils.aoa_to_sheet(rows);ws['!cols']=widths.map(w=>({wch:w}));X.utils.book_append_sheet(wb,ws,name)};
-  add('Inventario',[['LOTE','MARCA','PRENDA','REFERENCIA','TALLA','CANT. COMPRADA','VENDIDAS','DISPONIBLES','PRECIO USA','DESC. %','COSTO REAL COP','PRECIO VENTA','GANANCIA C/U','% GANANCIA'],
-    ...D.items.map(i=>[i.loteNombre,i.marca,i.articulo,i.ref,i.talla,i.cant,(+i.prevVend||0)+i.vApp,i.stock,i.usd,i.desc,i.costo,i.precio,(i.precio||0)-(i.costo||0),i.precio?Math.round(((i.precio-i.costo)/i.precio)*100)/100:0])],[24,16,40,16,8,10,10,11,10,8,14,14,14,10]);
+  add('Inventario',[['LOTE','SECCIÓN','MARCA','PRENDA','REFERENCIA','TALLA','CANT. COMPRADA','VENDIDAS','DISPONIBLES','PRECIO USA','DESC. %','COSTO REAL COP','PRECIO VENTA','GANANCIA C/U','% GANANCIA'],
+    ...D.items.map(i=>[i.loteNombre,i.sec,i.marca,i.articulo,i.ref,i.talla,i.cant,(+i.prevVend||0)+i.vApp,i.stock,i.usd,i.desc,i.costo,i.precio,(i.precio||0)-(i.costo||0),i.precio?Math.round(((i.precio-i.costo)/i.precio)*100)/100:0])],[24,12,16,40,16,8,10,10,11,10,8,14,14,14,10]);
   const vs=[...S.ventas].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')||a.factura-b.factura);
   add('Ventas',[['FECHA','FACTURA','IDENT. CLIENTE','NOMBRE CLIENTE','TELÉFONO','CODIGO','DESCRIPCION','MARCA','TALLA','CANTIDAD VENDIDA','VALOR TOTAL','COSTO','GANANCIA','% GANANCIA','ABONOS FACTURA','SALDO FACTURA','CANAL'],
     ...vs.flatMap(v=>(v.items||[]).map((i,k)=>[v.fecha,v.factura,(v.cliente||{}).cc||'',(v.cliente||{}).nombre||'',(v.cliente||{}).tel||'',i.ref,i.desc,i.marca,i.talla,i.cant,i.precio*i.cant,i.costo*i.cant,(i.precio-i.costo)*i.cant,i.precio?Math.round((i.precio-i.costo)/i.precio*100)/100:0,k===0?abonado(v):'',k===0?saldoVenta(v):'',v.canal||'']))],[11,9,14,26,13,14,36,14,7,9,12,12,12,9,12,12,10]);
@@ -1476,6 +1495,7 @@ document.addEventListener('click',async e=>{
   else if(act==='ver-lote')loteModal(a.dataset.id);
   else if(act==='ver-cliente')clienteModal(a.dataset.n);
   else if(act==='modo'){S.inv.modo=a.dataset.m;paint()}
+  else if(act==='sec'){S.inv.sec=a.dataset.s;paint()}
   else if(act==='cambiar-marca')marcaMasivaModal();
   else if(act==='caja-tipo'){S.cajaForm.tipo=a.dataset.t;S.cajaForm.cat=a.dataset.t==='salida'?CAT_SALIDA[0][0]:CAT_ENTRADA[0];paint()}
   else if(act==='caja-add'){
