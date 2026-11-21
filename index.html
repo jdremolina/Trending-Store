@@ -785,6 +785,8 @@ function vInventario(){
   </div>
   ${seedCard()}
   ${!list.length?`<div class="card empty"><img src="${MONO}" alt="">${D.items.length?'Nada coincide con esos filtros.':'Todavía no hay prendas. Registra tu primer lote de USA para llenar el inventario.'}${D.items.length?'':`<button class="btn primary" data-act="nuevo-lote">${ic(IC.plus)}Nuevo lote</button>`}</div>`
+  :(f.oferta&&f.modo==='lista')?`<div class="tw"><table class="tbl"><thead><tr><th></th><th>Prenda</th><th>Talla</th><th class="n">Precio antes</th><th class="n">Precio ${esc(promoNombre())}</th><th class="n">Le bajas</th><th class="n">Costo</th><th class="n">Ganas ahora</th><th class="n">Stock</th></tr></thead><tbody>${list.slice(0,600).map(i=>{const pf=precioFinal(i),g=pf-(i.costo||0);return `<tr class="click" data-act="item" data-k="${esc(i.key)}"><td><div class="thumb">${photoTag(i.foto)}</div></td><td><div class="gold" style="font-size:11px;font-weight:800;letter-spacing:.1em">${esc(i.marca)}</div>${esc(i.articulo)}</td><td>${esc(i.talla)}</td><td class="n muted"><s>${cop(i.precio)}</s></td><td class="n"><b>${cop(pf)}</b></td><td class="n gold">${cop(i.precio-pf)} <span class="promo-chip">−${Math.round(pctOferta(i)*100)}%</span></td><td class="n muted">${cop(i.costo)}</td><td class="n ${g>=0?'good':'bad'}">${cop(g)}</td><td class="n">${i.stock<=0?'<span class="chip bad">Vendida</span>':i.stock}</td></tr>`}).join('')}
+    <tr><td></td><td colspan="2"><b>Total (${list.length} prendas)</b></td><td class="n muted"><s>${cop(sum(list,i=>i.precio*Math.max(1,i.stock)))}</s></td><td class="n"><b>${cop(sum(list,i=>precioFinal(i)*Math.max(1,i.stock)))}</b></td><td class="n gold"><b>${cop(sum(list,i=>(i.precio-precioFinal(i))*Math.max(1,i.stock)))}</b></td><td class="n muted">${cop(sum(list,i=>(i.costo||0)*Math.max(1,i.stock)))}</td><td class="n good"><b>${cop(sum(list,i=>(precioFinal(i)-(i.costo||0))*Math.max(1,i.stock)))}</b></td><td></td></tr></tbody></table></div>`
   :f.modo==='lista'?`<div class="tw"><table class="tbl"><thead><tr><th></th><th>Prenda</th><th>Talla</th><th>Ref.</th><th>Lote</th><th class="n">Costo</th><th class="n">Precio</th><th class="n">Ganancia</th><th class="n">Stock</th></tr></thead><tbody>${list.slice(0,600).map(row).join('')}</tbody></table></div>`
   :`<div class="pgrid">${list.slice(0,400).map(card).join('')}</div>`}
   `;
@@ -948,22 +950,31 @@ async function importJson(file){
 /* ---------- descuento a varias prendas ---------- */
 function ofertaMasivaModal(){
   const items=invFiltered();if(!items.length)return;
-  const sel=new Set(items.map(i=>i.key));let pctTxt='20',modo='auto',busy=false;
+  const sel=new Set(items.map(i=>i.key));let pctTxt='20',modo='auto',busy=false,proteger=true,minTxt='0';
   const m=openModal(`Descuento ${promoNombre()}`,'wide');
-  const nuevo=i=>{const pc=parseNum(pctTxt);if(!(pc>0&&pc<100)||!i.precio)return null;const md=modo==='auto'?(String(Math.round(i.precio)).endsWith('999')?'999':'000'):modo;return redondear(i.precio*(1-pc/100),md)};
+  const mdDe=i=>modo==='auto'?(String(Math.round(i.precio)).endsWith('999')?'999':'000'):modo;
+  const subir=(x,md)=>md==='999'?Math.ceil((x+1)/1000)*1000-1:md==='000'?Math.ceil(x/1000)*1000:Math.ceil(x);
+  const piso=i=>(i.costo||0)+Math.max(0,parseNum(minTxt));
+  const limitado=i=>{const pc=parseNum(pctTxt);if(!proteger||!(pc>0&&pc<100)||!i.precio)return false;return redondear(i.precio*(1-pc/100),mdDe(i))<piso(i)};
+  const nuevo=i=>{const pc=parseNum(pctTxt);if(!(pc>0&&pc<100)||!i.precio)return null;const md=mdDe(i);let n=redondear(i.precio*(1-pc/100),md);
+    if(proteger&&n<piso(i)){n=subir(piso(i),md);if(n>=i.precio)return null}return n};
   const draw=()=>{withFocus(m.body,()=>{const s=items.filter(i=>sel.has(i.key));const tot=sum(s,i=>{const n=nuevo(i);return n!=null?(i.precio-n)*Math.max(1,i.stock):0});const perd=s.filter(i=>{const n=nuevo(i);return n!=null&&n<i.costo}).length;
     m.body.innerHTML=`
     <p style="margin:0">Escribe cuánto le bajas a las prendas de tu búsqueda. Antes de guardar ves el precio nuevo y cuánto te queda de ganancia.</p>
+    <div class="promo-box" style="display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center"><label style="display:flex;gap:8px;align-items:center;font-weight:700"><input type="checkbox" id="om-prot" ${proteger?'checked':''}> 🛡️ No vender por debajo del costo</label>
+      <label style="display:flex;gap:8px;align-items:center" class="muted">Ganancia mínima por prenda <input id="om-min" data-money inputmode="numeric" value="${esc(minTxt)}" style="width:120px" ${proteger?'':'disabled'}></label>
+      <span class="hint" style="margin:0">Si el % deja una prenda por debajo de eso, se le baja solo hasta donde no pierdas.</span></div>
     <div class="row3"><div class="fld"><label for="om-pct">Descuento %</label><input id="om-pct" inputmode="decimal" value="${esc(pctTxt)}"></div>
       <div class="fld"><label for="om-modo">Redondear precio</label><select id="om-modo"><option value="auto" ${modo==='auto'?'selected':''}>Como el precio actual (…999 o …000)</option><option value="999" ${modo==='999'?'selected':''}>Terminar en 999</option><option value="000" ${modo==='000'?'selected':''}>Terminar en 000</option><option value="exacto" ${modo==='exacto'?'selected':''}>Sin redondear</option></select></div>
       <div class="calc-box" style="align-self:end"><div><span>Le bajas en total</span><b class="gold">${cop(tot)}</b></div></div></div>
-    ${perd?`<p class="hint bad" style="margin:0">⚠️ ${perd} prenda(s) quedarían por debajo del costo (en rojo). Desmárcalas si no quieres perder plata.</p>`:''}
+    ${perd?`<p class="hint bad" style="margin:0">⚠️ ${perd} prenda(s) quedarían por debajo del costo (en rojo). Activa 🛡️ arriba o desmárcalas.</p>`:''}${proteger&&s.some(limitado)?`<p class="hint warn" style="margin:0">🛡️ ${s.filter(limitado).length} prenda(s) no aguantan el ${esc(pctTxt)}% completo: se les baja solo hasta no perder.${s.some(i=>limitado(i)&&nuevo(i)==null)?' Algunas no admiten ningún descuento y quedan igual.':''}</p>`:''}
     <div class="quick"><button class="btn sm" data-a="todas">Marcar todas</button><button class="btn sm" data-a="ninguna">Desmarcar todas</button><span class="hint" style="margin:0;align-self:center">${sel.size} de ${items.length} seleccionadas</span></div>
-    <div class="tw" style="max-height:44vh;overflow:auto"><table class="tbl"><thead><tr><th></th><th>Prenda</th><th>Talla</th><th class="n">Precio normal</th><th class="n">Precio ${esc(promoNombre())}</th><th class="n">Le bajas</th><th class="n">Ganas</th></tr></thead><tbody>${items.map(i=>{const n=nuevo(i);const g=n!=null?n-i.costo:null;return `<tr class="click" data-a="tog" data-k="${esc(i.key)}"><td style="width:36px"><input type="checkbox" tabindex="-1" ${sel.has(i.key)?'checked':''} aria-label="Seleccionar"></td><td><div class="gold" style="font-size:11px;font-weight:800;letter-spacing:.1em">${esc(i.marca)}</div>${esc(i.articulo)}</td><td>${esc(i.talla)}</td><td class="n">${cop(i.precio)}</td><td class="n"><b>${n!=null?cop(n):'—'}</b></td><td class="n gold">${n!=null?cop(i.precio-n):'—'}</td><td class="n ${g!=null&&g<0?'bad':'good'}">${g!=null?cop(g):'—'}</td></tr>`}).join('')}</tbody></table></div>
+    <div class="tw" style="max-height:44vh;overflow:auto"><table class="tbl"><thead><tr><th></th><th>Prenda</th><th>Talla</th><th class="n">Costo</th><th class="n">Precio antes</th><th class="n">Precio ${esc(promoNombre())}</th><th class="n">Le bajas</th><th class="n">Ganas</th></tr></thead><tbody>${items.map(i=>{const n=nuevo(i);const g=n!=null?n-i.costo:null;return `<tr class="click" data-a="tog" data-k="${esc(i.key)}"><td style="width:36px"><input type="checkbox" tabindex="-1" ${sel.has(i.key)?'checked':''} aria-label="Seleccionar"></td><td><div class="gold" style="font-size:11px;font-weight:800;letter-spacing:.1em">${esc(i.marca)}</div>${esc(i.articulo)}</td><td>${esc(i.talla)}</td><td class="n muted">${cop(i.costo)}</td><td class="n">${cop(i.precio)}</td><td class="n"><b>${n!=null?cop(n):'—'}</b>${limitado(i)?`<br><span class="chip warn" title="Se bajó solo hasta no perder">🛡️ tope</span>`:''}</td><td class="n gold">${n!=null?`${cop(i.precio-n)}<br><span class="m">−${Math.round((1-n/i.precio)*100)}%</span>`:'—'}</td><td class="n ${g!=null&&g<0?'bad':'good'}">${g!=null?cop(g):'—'}</td></tr>`}).join('')}</tbody></table></div>
     <div class="sheet-f"><button class="btn danger" data-a="quitar">Quitar descuento a las seleccionadas</button><span class="grow"></span><button class="btn ghost" data-a="cancel">Cancelar</button><button class="btn primary" data-a="ok" ${busy?'disabled':''}>${busy?'Guardando…':`Poner −${esc(pctTxt||'0')}% a ${sel.size}`}</button></div>`})};
   draw();
   m.body.addEventListener('input',e=>{if(e.target.id==='om-pct'){pctTxt=e.target.value;draw()}});
-  m.body.addEventListener('change',e=>{if(e.target.id==='om-modo'){modo=e.target.value;draw()}});
+  m.body.addEventListener('change',e=>{if(e.target.id==='om-modo'){modo=e.target.value;draw()}if(e.target.id==='om-prot'){proteger=e.target.checked;draw()}});
+  m.body.addEventListener('focusout',e=>{if(e.target.id==='om-min'){minTxt=e.target.value;draw()}});
   const guardar=async quitar=>{
     if(!sel.size){toast('Selecciona al menos una prenda.','bad');return}
     if(!quitar){const pc=parseNum(pctTxt);if(!(pc>0&&pc<100)){toast('Escribe un descuento entre 1 y 99%.','bad');return}}
@@ -1197,6 +1208,7 @@ function itemModal(key){
     if(ofv>0&&ofv>=prv){toast('El precio de oferta debe ser menor que el precio normal.','bad');return false}
     Object.assign(l.items[i],{oferta:ofv>0?{precio:ofv}:null,seccion:st.seccion||null,marca:st.marca.trim().toUpperCase(),articulo:st.articulo.trim(),ref:st.ref.trim(),talla:(st.talla.trim()||'ÚNICA').toUpperCase(),cant,usd:parseNum(st.usd),desc:parseNum(st.desc),precio:Math.round(parseNum(st.precio)),foto:st.fotos[0]||null,fotosExtra:st.fotos.slice(1)});
     finishLote(l);
+    if(!silent&&ofv>0&&ofv<l.items[i].costo&&!(await confirmBox(`Con el precio ${esc(promoNombre())} de <b>${cop(ofv)}</b> <b class="bad">pierdes ${cop(l.items[i].costo-ofv)}</b> en esta prenda (su costo es ${cop(l.items[i].costo)}). ¿Guardar así de todas formas?`,'Sí, guardar',true)))return false;
     const {id,...data}=l;
     const ok=await write(()=>db.collection('lotes').doc(id).set(data));
     if(ok&&!silent)toast('Prenda guardada','good');
@@ -1565,7 +1577,7 @@ document.addEventListener('click',async e=>{
   else if(act==='ver-cliente')clienteModal(a.dataset.n);
   else if(act==='modo'){S.inv.modo=a.dataset.m;paint()}
   else if(act==='sec'){S.inv.sec=a.dataset.s;paint()}
-  else if(act==='ver-ofertas'){S.inv.oferta=!S.inv.oferta;paint()}
+  else if(act==='ver-ofertas'){S.inv.oferta=!S.inv.oferta;if(S.inv.oferta)S.inv.modo='lista';paint()}
   else if(act==='poner-oferta')ofertaMasivaModal();
   else if(act==='cambiar-marca')marcaMasivaModal();
   else if(act==='caja-tipo'){S.cajaForm.tipo=a.dataset.t;S.cajaForm.cat=a.dataset.t==='salida'?CAT_SALIDA[0][0]:CAT_ENTRADA[0];paint()}
